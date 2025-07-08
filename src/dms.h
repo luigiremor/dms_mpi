@@ -2,7 +2,7 @@
 #define DMS_H
 
 #include <fcntl.h>
-#include <mqueue.h>
+#include <mpi.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -60,14 +60,14 @@ typedef struct {
 } dms_message_t;
 
 typedef struct {
-    byte *blocks;                     // local blocks storage
-    cache_entry_t cache[CACHE_SIZE];  // cache for remote blocks
-    int cache_count;
     dms_config_t config;
-    mqd_t message_queue;  // message queue for IPC
-    char queue_name[32];
+    byte *blocks;
+    int *block_owners;
+    cache_entry_t cache[CACHE_SIZE];
     pthread_mutex_t cache_mutex;
-    int *block_owners;  // mapping of block to owner process
+    pthread_mutex_t mpi_mutex;  // New mutex for MPI operations
+    int mpi_rank;
+    int mpi_size;
 } dms_context_t;
 
 extern dms_context_t *dms_ctx;
@@ -89,7 +89,6 @@ int send_message(int target_pid, dms_message_t *msg);
 int receive_message(dms_message_t *msg);
 int invalidate_cache_entry(int block_id);
 int handle_incoming_messages(void);
-void *message_handler_thread(void *arg);
 byte *get_local_block_data(int block_id);
 int handle_message(dms_message_t *msg);
 int invalidate_cache_in_other_processes(int block_id);

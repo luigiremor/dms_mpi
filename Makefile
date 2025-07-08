@@ -1,8 +1,8 @@
 # Distributed Shared Memory System Makefile
 
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -D_POSIX_C_SOURCE=200112L -pthread
-LDFLAGS = -pthread -lrt
+CC = mpicc
+CFLAGS = -Wall -Wextra -std=c99 -pthread
+LDFLAGS = -pthread
 TARGET = dms
 TEST_TARGET = dms_test
 

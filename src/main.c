@@ -9,7 +9,6 @@
 #include "dms.h"
 
 static int running = 1;
-static pthread_t message_thread;
 
 void signal_handler(int sig) {
     running = 0;
@@ -197,8 +196,15 @@ int main(int argc, char *argv[]) {
     dms_config_t config;
     int result;
 
-    printf("Distributed Shared Memory System\n");
-    printf("================================\n");
+    // Initialize MPI
+    MPI_Init(&argc, &argv);
+
+    // Get MPI info early for debugging
+    int mpi_rank, mpi_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+
+    printf("Distributed Shared Memory System - Process %d/%d\n", mpi_rank, mpi_size);
 
     // Setup signal handler
     signal(SIGINT, signal_handler);
@@ -209,42 +215,48 @@ int main(int argc, char *argv[]) {
         // Configuration file provided
         result = load_config_from_file(argv[1], &config);
         if (result != DMS_SUCCESS) {
-            fprintf(stderr, "Error loading configuration from file\n");
+            fprintf(stderr, "Process %d: Error loading configuration from file\n", mpi_rank);
+            MPI_Finalize();
             return 1;
         }
     } else {
         // Parse command line arguments
         result = parse_command_line_config(argc, argv, &config);
         if (result != DMS_SUCCESS) {
+            MPI_Finalize();
             return 1;
         }
     }
 
-    print_config(&config);
+    // Check MPI size matches configuration
+    if (mpi_size != config.n) {
+        fprintf(stderr, "Process %d: MPI size (%d) doesn't match config n (%d)\n",
+                mpi_rank, mpi_size, config.n);
+        MPI_Finalize();
+        return 1;
+    }
+
+    if (mpi_rank == 0) {
+        print_config(&config);
+    }
 
     // Initialize DMS
-    printf("\nInitializing DMS...\n");
     result = dms_init(&config);
     if (result != DMS_SUCCESS) {
-        fprintf(stderr, "Error initializing DMS: %d\n", result);
+        fprintf(stderr, "Process %d: Error initializing DMS: %d\n", mpi_rank, result);
+        MPI_Finalize();
         return 1;
     }
 
-    printf("DMS initialized successfully!\n");
-
-    // Start message handler thread
-    if (pthread_create(&message_thread, NULL, message_handler_thread, NULL) != 0) {
-        fprintf(stderr, "Error creating message handler thread\n");
-        dms_cleanup();
-        return 1;
-    }
-
-    // Give some time for all processes to start
-    sleep(2);
+    // Synchronize all processes before starting tests
+    pthread_mutex_lock(&dms_ctx->mpi_mutex);
+    MPI_Barrier(MPI_COMM_WORLD);
+    pthread_mutex_unlock(&dms_ctx->mpi_mutex);
 
     // Run tests based on process ID
     if (config.process_id == 0) {
         // Master process runs all tests
+        printf("\nRunning DMS tests...\n");
         test_basic_operations();
         test_cross_block_operations();
         test_cache_behavior();
@@ -252,28 +264,28 @@ int main(int argc, char *argv[]) {
         // Run interactive mode
         run_interactive_mode();
     } else {
-        // Other processes just handle requests
+        // Other processes just handle requests in a loop
         printf("Process %d ready, handling requests...\n", config.process_id);
-        printf("Press Ctrl+C to exit\n");
 
         while (running) {
-            sleep(1);
+            handle_incoming_messages();
+            usleep(10000);  // 10ms delay
         }
     }
 
     // Cleanup
-    printf("\nShutting down...\n");
+    printf("Process %d: Shutting down...\n", mpi_rank);
     running = 0;
-
-    // Wait for message thread to finish
-    pthread_join(message_thread, NULL);
 
     result = dms_cleanup();
     if (result != DMS_SUCCESS) {
-        fprintf(stderr, "Error during cleanup: %d\n", result);
+        fprintf(stderr, "Process %d: Error during cleanup: %d\n", mpi_rank, result);
+        MPI_Finalize();
         return 1;
     }
 
-    printf("DMS shutdown complete\n");
+    // Finalize MPI
+    MPI_Finalize();
+
     return 0;
 }

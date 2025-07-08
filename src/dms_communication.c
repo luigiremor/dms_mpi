@@ -1,10 +1,8 @@
 #include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
+#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "dms.h"
@@ -14,21 +12,14 @@ int send_message(int target_pid, dms_message_t *msg) {
         return DMS_ERROR_INVALID_PROCESS;
     }
 
-    char target_queue_name[32];
-    snprintf(target_queue_name, sizeof(target_queue_name), "/dms_queue_%d", target_pid);
-
-    mqd_t target_queue = mq_open(target_queue_name, O_WRONLY);
-    if (target_queue == (mqd_t)-1) {
-        return DMS_ERROR_COMMUNICATION;
-    }
-
-    msg->source_pid = dms_ctx->config.process_id;
+    msg->source_pid = dms_ctx->mpi_rank;
     msg->target_pid = target_pid;
 
-    int result = mq_send(target_queue, (const char *)msg, sizeof(dms_message_t), 0);
-    mq_close(target_queue);
+    pthread_mutex_lock(&dms_ctx->mpi_mutex);
+    int result = MPI_Send(msg, sizeof(dms_message_t), MPI_BYTE, target_pid, 0, MPI_COMM_WORLD);
+    pthread_mutex_unlock(&dms_ctx->mpi_mutex);
 
-    if (result == -1) {
+    if (result != MPI_SUCCESS) {
         return DMS_ERROR_COMMUNICATION;
     }
 
@@ -40,16 +31,29 @@ int receive_message(dms_message_t *msg) {
         return DMS_ERROR_COMMUNICATION;
     }
 
-    ssize_t bytes_received = mq_receive(dms_ctx->message_queue, (char *)msg, sizeof(dms_message_t), NULL);
+    MPI_Status status;
+    int flag;
 
-    if (bytes_received == -1) {
-        if (errno == EAGAIN) {
-            return DMS_ERROR_COMMUNICATION;  // No message available
-        }
+    pthread_mutex_lock(&dms_ctx->mpi_mutex);
+
+    // Non-blocking receive to check for messages
+    int result = MPI_Iprobe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &flag, &status);
+    if (result != MPI_SUCCESS) {
+        pthread_mutex_unlock(&dms_ctx->mpi_mutex);
         return DMS_ERROR_COMMUNICATION;
     }
 
-    if (bytes_received != sizeof(dms_message_t)) {
+    if (!flag) {
+        pthread_mutex_unlock(&dms_ctx->mpi_mutex);
+        return DMS_ERROR_COMMUNICATION;  // No message available
+    }
+
+    // Receive the message
+    result = MPI_Recv(msg, sizeof(dms_message_t), MPI_BYTE, status.MPI_SOURCE, 0, MPI_COMM_WORLD, &status);
+
+    pthread_mutex_unlock(&dms_ctx->mpi_mutex);
+
+    if (result != MPI_SUCCESS) {
         return DMS_ERROR_COMMUNICATION;
     }
 
@@ -71,9 +75,12 @@ int request_block_from_owner(int block_id, int owner_pid) {
         return result;
     }
 
-    // Wait for response
+    // Wait for response with timeout, actively handling other messages
     dms_message_t response;
-    while (1) {
+    int attempts = 0;
+    const int max_attempts = 1000;  // 1 second timeout
+
+    while (attempts < max_attempts) {
         result = receive_message(&response);
         if (result == DMS_SUCCESS) {
             if (response.type == MSG_READ_RESPONSE && response.block_id == block_id) {
@@ -85,19 +92,26 @@ int request_block_from_owner(int block_id, int owner_pid) {
 
                 pthread_mutex_lock(&cache_entry->mutex);
                 memcpy(cache_entry->data, response.data, dms_ctx->config.t);
+                cache_entry->valid = 1;
                 pthread_mutex_unlock(&cache_entry->mutex);
 
-                break;
+                return DMS_SUCCESS;
             }
-            // If it's not our response, handle it separately
-            handle_message(&response);
+            // Handle other messages that aren't our response
+            if (response.type != MSG_READ_RESPONSE &&
+                response.type != MSG_WRITE_RESPONSE &&
+                response.type != MSG_INVALIDATE_ACK) {
+                handle_message(&response);
+            }
         } else {
-            // Continue waiting or handle timeout
+            // No message available, check for any other incoming messages
+            handle_incoming_messages();
             usleep(1000);  // 1ms delay
+            attempts++;
         }
     }
 
-    return DMS_SUCCESS;
+    return DMS_ERROR_COMMUNICATION;
 }
 
 int handle_message(dms_message_t *msg) {
@@ -105,11 +119,16 @@ int handle_message(dms_message_t *msg) {
         return DMS_ERROR_COMMUNICATION;
     }
 
+    printf("DEBUG: Process %d handling message type %d from process %d for block %d\n",
+           dms_ctx->mpi_rank, msg->type, msg->source_pid, msg->block_id);
+
     switch (msg->type) {
         case MSG_READ_REQUEST: {
+            printf("DEBUG: Processing read request\n");
             // Someone wants to read a block we own
             byte *local_data = get_local_block_data(msg->block_id);
             if (!local_data) {
+                printf("DEBUG: Block %d not found locally\n", msg->block_id);
                 return DMS_ERROR_BLOCK_NOT_FOUND;
             }
 
@@ -119,13 +138,16 @@ int handle_message(dms_message_t *msg) {
             response.block_id = msg->block_id;
             memcpy(response.data, local_data, dms_ctx->config.t);
 
+            printf("DEBUG: Sending read response\n");
             return send_message(msg->source_pid, &response);
         }
 
         case MSG_WRITE_REQUEST: {
+            printf("DEBUG: Processing write request\n");
             // Someone wants to write to a block we own
             byte *local_data = get_local_block_data(msg->block_id);
             if (!local_data) {
+                printf("DEBUG: Block %d not found locally\n", msg->block_id);
                 return DMS_ERROR_BLOCK_NOT_FOUND;
             }
 
@@ -134,6 +156,7 @@ int handle_message(dms_message_t *msg) {
             int size = msg->size;
             if (offset >= 0 && offset + size <= dms_ctx->config.t) {
                 memcpy(local_data + offset, msg->data, size);
+                printf("DEBUG: Updated block %d\n", msg->block_id);
             }
 
             // Send acknowledgment
@@ -142,15 +165,18 @@ int handle_message(dms_message_t *msg) {
             response.type = MSG_WRITE_RESPONSE;
             response.block_id = msg->block_id;
 
+            printf("DEBUG: Sending write response\n");
             int result = send_message(msg->source_pid, &response);
 
             // Invalidate cache entries in other processes
+            printf("DEBUG: Invalidating caches in other processes\n");
             invalidate_cache_in_other_processes(msg->block_id);
 
             return result;
         }
 
         case MSG_INVALIDATE: {
+            printf("DEBUG: Processing invalidate request\n");
             // Invalidate cache entry for this block
             cache_entry_t *entry = find_cache_entry(msg->block_id);
             if (entry) {
@@ -158,6 +184,7 @@ int handle_message(dms_message_t *msg) {
                 entry->valid = 0;
                 entry->dirty = 0;
                 pthread_mutex_unlock(&entry->mutex);
+                printf("DEBUG: Invalidated cache for block %d\n", msg->block_id);
             }
 
             // Send acknowledgment
@@ -166,13 +193,19 @@ int handle_message(dms_message_t *msg) {
             response.type = MSG_INVALIDATE_ACK;
             response.block_id = msg->block_id;
 
+            printf("DEBUG: Sending invalidate ack\n");
             return send_message(msg->source_pid, &response);
         }
 
         case MSG_READ_RESPONSE:
         case MSG_WRITE_RESPONSE:
         case MSG_INVALIDATE_ACK:
-            // These should be handled by the calling function
+            // These should be handled by the calling function, not here
+            printf("DEBUG: Ignoring response type %d (should be handled by caller)\n", msg->type);
+            break;
+
+        default:
+            printf("DEBUG: Unknown message type %d\n", msg->type);
             break;
     }
 
@@ -205,27 +238,10 @@ int handle_incoming_messages(void) {
 
     dms_message_t msg;
 
-    // Set non-blocking mode for the queue
-    struct mq_attr old_attr, new_attr;
-    mq_getattr(dms_ctx->message_queue, &old_attr);
-    new_attr = old_attr;
-    new_attr.mq_flags = O_NONBLOCK;
-    mq_setattr(dms_ctx->message_queue, &new_attr, NULL);
-
+    // Process all available messages
     while (receive_message(&msg) == DMS_SUCCESS) {
         handle_message(&msg);
     }
 
-    // Restore blocking mode
-    mq_setattr(dms_ctx->message_queue, &old_attr, NULL);
-
     return DMS_SUCCESS;
-}
-
-void *message_handler_thread(void *arg) {
-    while (dms_ctx) {
-        handle_incoming_messages();
-        usleep(10000);  // 10ms delay
-    }
-    return NULL;
 }

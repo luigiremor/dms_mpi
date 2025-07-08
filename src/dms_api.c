@@ -43,22 +43,29 @@ int le(int posicao, byte *buffer, int tamanho) {
             }
         } else {
             // Remote block - check cache first
+            printf("DEBUG: Process %d reading from remote block %d (owner=%d)\n",
+                   dms_ctx->mpi_rank, block_id, owner);
+
             cache_entry_t *cache_entry = find_cache_entry(block_id);
 
             if (cache_entry && cache_entry->valid) {
                 // Cache hit - read from cache
+                printf("DEBUG: Cache hit for block %d\n", block_id);
                 pthread_mutex_lock(&cache_entry->mutex);
                 data_source = cache_entry->data;
             } else {
                 // Cache miss - request block from owner
+                printf("DEBUG: Cache miss for block %d, requesting from owner\n", block_id);
                 int result = request_block_from_owner(block_id, owner);
                 if (result != DMS_SUCCESS) {
+                    printf("DEBUG: Failed to get remote block %d\n", block_id);
                     return result;
                 }
 
                 // Now find the cache entry (should be available)
                 cache_entry = find_cache_entry(block_id);
                 if (!cache_entry) {
+                    printf("DEBUG: Cache entry not found after request\n");
                     return DMS_ERROR_MEMORY;
                 }
 
@@ -125,6 +132,9 @@ int escreve(int posicao, byte *buffer, int tamanho) {
 
         } else {
             // Remote block - send write request to owner
+            printf("DEBUG: Process %d writing to remote block %d (owner=%d)\n",
+                   dms_ctx->mpi_rank, block_id, owner);
+
             dms_message_t write_request;
             memset(&write_request, 0, sizeof(write_request));
             write_request.type = MSG_WRITE_REQUEST;
@@ -135,22 +145,39 @@ int escreve(int posicao, byte *buffer, int tamanho) {
 
             int result = send_message(owner, &write_request);
             if (result != DMS_SUCCESS) {
+                printf("DEBUG: Failed to send write request\n");
                 return result;
             }
 
-            // Wait for acknowledgment
+            printf("DEBUG: Sent write request, waiting for response...\n");
+
+            // Wait for acknowledgment with timeout
             dms_message_t response;
-            while (1) {
+            int attempts = 0;
+            const int max_attempts = 1000;  // 1 second timeout
+            int found_response = 0;
+
+            while (attempts < max_attempts && !found_response) {
                 result = receive_message(&response);
                 if (result == DMS_SUCCESS) {
                     if (response.type == MSG_WRITE_RESPONSE && response.block_id == block_id) {
-                        break;
+                        printf("DEBUG: Got write response\n");
+                        found_response = 1;
+                    } else {
+                        // Handle other messages that aren't our response
+                        printf("DEBUG: Handling other message type %d\n", response.type);
+                        handle_message(&response);
                     }
-                    // Handle other messages
-                    handle_message(&response);
                 } else {
+                    // No message available, process other messages
+                    attempts++;
                     usleep(1000);  // 1ms delay
                 }
+            }
+
+            if (!found_response) {
+                printf("DEBUG: Timeout waiting for write response\n");
+                return DMS_ERROR_COMMUNICATION;
             }
 
             // Invalidate our own cache entry for this block

@@ -13,23 +13,19 @@ RUN apt-get update && apt-get install -y \
     valgrind \
     htop \
     vim \
+    libopenmpi-dev \
+    openmpi-bin \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /app
 
 # Copy source files
-COPY src/ ./src/
-COPY Makefile README.md ./
-
-# Create necessary directories
-RUN mkdir -p /dev/mqueue
+COPY ./src/ ./src/
+COPY ./Makefile ./README.md ./
 
 # Build the application
 RUN make clean && make
-
-# Set up environment for POSIX message queues
-RUN echo "none /dev/mqueue mqueue rw,relatime 0 0" >> /etc/fstab
 
 # Create a non-root user for better security
 RUN useradd -m -s /bin/bash dmsuser && \

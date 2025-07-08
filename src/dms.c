@@ -79,31 +79,31 @@ int dms_init(dms_config_t *config) {
     // Initialize cache mutex
     pthread_mutex_init(&dms_ctx->cache_mutex, NULL);
 
-    // Create message queue
-    snprintf(dms_ctx->queue_name, sizeof(dms_ctx->queue_name), "/dms_queue_%d", config->process_id);
+    // Initialize MPI mutex
+    pthread_mutex_init(&dms_ctx->mpi_mutex, NULL);
 
-    struct mq_attr attr;
-    attr.mq_flags = 0;
-    attr.mq_maxmsg = 10;
-    attr.mq_msgsize = sizeof(dms_message_t);
-    attr.mq_curmsgs = 0;
+    // Get MPI rank and size
+    MPI_Comm_rank(MPI_COMM_WORLD, &dms_ctx->mpi_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &dms_ctx->mpi_size);
 
-    // Remove existing queue if it exists
-    mq_unlink(dms_ctx->queue_name);
-
-    dms_ctx->message_queue = mq_open(dms_ctx->queue_name, O_CREAT | O_RDWR, 0644, &attr);
-    if (dms_ctx->message_queue == (mqd_t)-1) {
+    // Verify MPI configuration matches DMS configuration
+    if (dms_ctx->mpi_size != config->n) {
         // Cleanup
         for (int i = 0; i < CACHE_SIZE; i++) {
             free(dms_ctx->cache[i].data);
             pthread_mutex_destroy(&dms_ctx->cache[i].mutex);
         }
         pthread_mutex_destroy(&dms_ctx->cache_mutex);
+        pthread_mutex_destroy(&dms_ctx->mpi_mutex);
         free(dms_ctx->block_owners);
         free(dms_ctx->blocks);
         free(dms_ctx);
         return DMS_ERROR_COMMUNICATION;
     }
+
+    // Use MPI rank as process ID
+    config->process_id = dms_ctx->mpi_rank;
+    dms_ctx->config.process_id = dms_ctx->mpi_rank;
 
     return DMS_SUCCESS;
 }
@@ -201,12 +201,6 @@ int dms_cleanup(void) {
         return DMS_SUCCESS;
     }
 
-    // Close message queue
-    if (dms_ctx->message_queue != (mqd_t)-1) {
-        mq_close(dms_ctx->message_queue);
-        mq_unlink(dms_ctx->queue_name);
-    }
-
     // Cleanup cache
     for (int i = 0; i < CACHE_SIZE; i++) {
         if (dms_ctx->cache[i].data) {
@@ -216,6 +210,7 @@ int dms_cleanup(void) {
     }
 
     pthread_mutex_destroy(&dms_ctx->cache_mutex);
+    pthread_mutex_destroy(&dms_ctx->mpi_mutex);
 
     if (dms_ctx->blocks) {
         free(dms_ctx->blocks);
