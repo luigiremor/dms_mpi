@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  dms-process-0:
+    build: .
+    container_name: dms_process_0
+    command: ["./dms", "-n", "4", "-k", "100", "-t", "1024", "-p", "0"]
+    privileged: true
+    volumes:
+      - /dev/mqueue:/dev/mqueue
+    stdin_open: true
+    tty: true
+    networks:
+      - dms-network
+
+  dms-process-1:
+    build: .
+    container_name: dms_process_1
+    command: ["./dms", "-n", "4", "-k", "100", "-t", "1024", "-p", "1"]
+    privileged: true
+    volumes:
+      - /dev/mqueue:/dev/mqueue
+    depends_on:
+      - dms-process-0
+    networks:
+      - dms-network
+
+  dms-process-2:
+    build: .
+    container_name: dms_process_2
+    command: ["./dms", "-n", "4", "-k", "100", "-t", "1024", "-p", "2"]
+    privileged: true
+    volumes:
+      - /dev/mqueue:/dev/mqueue
+    depends_on:
+      - dms-process-0
+    networks:
+      - dms-network
+
+  dms-process-3:
+    build: .
+    container_name: dms_process_3
+    command: ["./dms", "-n", "4", "-k", "100", "-t", "1024", "-p", "3"]
+    privileged: true
+    volumes:
+      - /dev/mqueue:/dev/mqueue
+    depends_on:
+      - dms-process-0
+    networks:
+      - dms-network
+
+networks:
+  dms-network:
+    driver: bridge

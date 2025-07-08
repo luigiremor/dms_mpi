@@ -1,0 +1,118 @@
+# Compiled object files
+*.o
+*.obj
+
+# Executables
+dms
+dms_test
+*.exe
+*.out
+*.app
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Core dumps
+core
+*.core
+
+# Build directories
+build/
+dist/
+bin/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Vim files
+*.vim
+
+# Emacs files
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Docker
+.dockerignore
+
+# Log files
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Configuration files (keep template)
+dms.conf
+
+# POSIX message queue files
+/dev/mqueue/
+
+# Valgrind output
+*.valgrind
+vgcore.*
+
+# GDB files
+.gdb_history
+
+# CMake (if used in future)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile.cmake
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Test results
+test_results/
+*.test 
