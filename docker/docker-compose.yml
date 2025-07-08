@@ -8,6 +8,9 @@ services:
       [
         "mpirun",
         "--allow-run-as-root",
+        "--mca",
+        "btl",
+        "^vader",
         "-np",
         "4",
         "./dms",

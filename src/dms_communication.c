@@ -1,11 +1,16 @@
 #include <errno.h>
 #include <mpi.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "dms.h"
+
+static inline size_t effective_size(const dms_message_t *msg) {
+    return offsetof(dms_message_t, data) + msg->size;
+}
 
 int send_message(int target_pid, dms_message_t *msg) {
     if (!dms_ctx || !msg || target_pid < 0 || target_pid >= dms_ctx->config.n) {
@@ -15,8 +20,10 @@ int send_message(int target_pid, dms_message_t *msg) {
     msg->source_pid = dms_ctx->mpi_rank;
     msg->target_pid = target_pid;
 
+    size_t nbytes = effective_size(msg);
+
     pthread_mutex_lock(&dms_ctx->mpi_mutex);
-    int result = MPI_Send(msg, sizeof(dms_message_t), MPI_BYTE, target_pid, 0, MPI_COMM_WORLD);
+    int result = MPI_Send(msg, nbytes, MPI_BYTE, target_pid, 0, MPI_COMM_WORLD);
     pthread_mutex_unlock(&dms_ctx->mpi_mutex);
 
     if (result != MPI_SUCCESS) {
@@ -36,7 +43,6 @@ int receive_message(dms_message_t *msg) {
 
     pthread_mutex_lock(&dms_ctx->mpi_mutex);
 
-    // Non-blocking receive to check for messages
     int result = MPI_Iprobe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &flag, &status);
     if (result != MPI_SUCCESS) {
         pthread_mutex_unlock(&dms_ctx->mpi_mutex);
@@ -45,11 +51,13 @@ int receive_message(dms_message_t *msg) {
 
     if (!flag) {
         pthread_mutex_unlock(&dms_ctx->mpi_mutex);
-        return DMS_ERROR_COMMUNICATION;  // No message available
+        return DMS_ERROR_COMMUNICATION;
     }
 
-    // Receive the message
-    result = MPI_Recv(msg, sizeof(dms_message_t), MPI_BYTE, status.MPI_SOURCE, 0, MPI_COMM_WORLD, &status);
+    int nbytes;
+    MPI_Get_count(&status, MPI_BYTE, &nbytes);
+
+    result = MPI_Recv(msg, nbytes, MPI_BYTE, status.MPI_SOURCE, 0, MPI_COMM_WORLD, &status);
 
     pthread_mutex_unlock(&dms_ctx->mpi_mutex);
 
@@ -69,6 +77,7 @@ int request_block_from_owner(int block_id, int owner_pid) {
     memset(&request, 0, sizeof(request));
     request.type = MSG_READ_REQUEST;
     request.block_id = block_id;
+    request.size = 0;  // No data payload for read requests
 
     int result = send_message(owner_pid, &request);
     if (result != DMS_SUCCESS) {
@@ -104,8 +113,8 @@ int request_block_from_owner(int block_id, int owner_pid) {
                 handle_message(&response);
             }
         } else {
-            // No message available, check for any other incoming messages
-            handle_incoming_messages();
+            // No message available, wait before retrying
+            // (Removed handle_incoming_messages() to avoid consuming responses)
             usleep(1000);  // 1ms delay
             attempts++;
         }
@@ -119,13 +128,18 @@ int handle_message(dms_message_t *msg) {
         return DMS_ERROR_COMMUNICATION;
     }
 
+    if (msg->type == MSG_READ_RESPONSE ||
+        msg->type == MSG_WRITE_RESPONSE ||
+        msg->type == MSG_INVALIDATE_ACK) {
+        return DMS_SUCCESS;
+    }
+
     printf("DEBUG: Process %d handling message type %d from process %d for block %d\n",
            dms_ctx->mpi_rank, msg->type, msg->source_pid, msg->block_id);
 
     switch (msg->type) {
         case MSG_READ_REQUEST: {
             printf("DEBUG: Processing read request\n");
-            // Someone wants to read a block we own
             byte *local_data = get_local_block_data(msg->block_id);
             if (!local_data) {
                 printf("DEBUG: Block %d not found locally\n", msg->block_id);
@@ -136,6 +150,7 @@ int handle_message(dms_message_t *msg) {
             memset(&response, 0, sizeof(response));
             response.type = MSG_READ_RESPONSE;
             response.block_id = msg->block_id;
+            response.size = dms_ctx->config.t;  // Full block size
             memcpy(response.data, local_data, dms_ctx->config.t);
 
             printf("DEBUG: Sending read response\n");
@@ -144,14 +159,12 @@ int handle_message(dms_message_t *msg) {
 
         case MSG_WRITE_REQUEST: {
             printf("DEBUG: Processing write request\n");
-            // Someone wants to write to a block we own
             byte *local_data = get_local_block_data(msg->block_id);
             if (!local_data) {
                 printf("DEBUG: Block %d not found locally\n", msg->block_id);
                 return DMS_ERROR_BLOCK_NOT_FOUND;
             }
 
-            // Update local data
             int offset = msg->position;
             int size = msg->size;
             if (offset >= 0 && offset + size <= dms_ctx->config.t) {
@@ -159,16 +172,15 @@ int handle_message(dms_message_t *msg) {
                 printf("DEBUG: Updated block %d\n", msg->block_id);
             }
 
-            // Send acknowledgment
             dms_message_t response;
             memset(&response, 0, sizeof(response));
             response.type = MSG_WRITE_RESPONSE;
             response.block_id = msg->block_id;
+            response.size = 0;  // No data payload for write responses
 
             printf("DEBUG: Sending write response\n");
             int result = send_message(msg->source_pid, &response);
 
-            // Invalidate cache entries in other processes
             printf("DEBUG: Invalidating caches in other processes\n");
             invalidate_cache_in_other_processes(msg->block_id);
 
@@ -177,7 +189,6 @@ int handle_message(dms_message_t *msg) {
 
         case MSG_INVALIDATE: {
             printf("DEBUG: Processing invalidate request\n");
-            // Invalidate cache entry for this block
             cache_entry_t *entry = find_cache_entry(msg->block_id);
             if (entry) {
                 pthread_mutex_lock(&entry->mutex);
@@ -187,22 +198,15 @@ int handle_message(dms_message_t *msg) {
                 printf("DEBUG: Invalidated cache for block %d\n", msg->block_id);
             }
 
-            // Send acknowledgment
             dms_message_t response;
             memset(&response, 0, sizeof(response));
             response.type = MSG_INVALIDATE_ACK;
             response.block_id = msg->block_id;
+            response.size = 0;  // No data payload for invalidate acks
 
             printf("DEBUG: Sending invalidate ack\n");
             return send_message(msg->source_pid, &response);
         }
-
-        case MSG_READ_RESPONSE:
-        case MSG_WRITE_RESPONSE:
-        case MSG_INVALIDATE_ACK:
-            // These should be handled by the calling function, not here
-            printf("DEBUG: Ignoring response type %d (should be handled by caller)\n", msg->type);
-            break;
 
         default:
             printf("DEBUG: Unknown message type %d\n", msg->type);
@@ -221,6 +225,7 @@ int invalidate_cache_in_other_processes(int block_id) {
     memset(&invalidate_msg, 0, sizeof(invalidate_msg));
     invalidate_msg.type = MSG_INVALIDATE;
     invalidate_msg.block_id = block_id;
+    invalidate_msg.size = 0;  // No data payload for invalidate messages
 
     for (int i = 0; i < dms_ctx->config.n; i++) {
         if (i != dms_ctx->config.process_id) {

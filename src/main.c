@@ -196,8 +196,13 @@ int main(int argc, char *argv[]) {
     dms_config_t config;
     int result;
 
-    // Initialize MPI
-    MPI_Init(&argc, &argv);
+    // Initialize MPI with thread support
+    int provided;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+    if (provided < MPI_THREAD_MULTIPLE) {
+        fprintf(stderr, "MPI não suporta múltiplas threads.\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
 
     // Get MPI info early for debugging
     int mpi_rank, mpi_size;
