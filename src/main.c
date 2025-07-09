@@ -209,7 +209,7 @@ int main(int argc, char *argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
 
-    printf("Distributed Shared Memory System - Process %d/%d\n", mpi_rank, mpi_size);
+    printf("Distributed Shared Memory System - Process %d/%d\n", mpi_rank, mpi_size - 1);
 
     // Setup signal handler
     signal(SIGINT, signal_handler);
