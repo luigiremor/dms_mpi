@@ -16,11 +16,11 @@ O Sistema de Memória Compartilhada Distribuída (DMS) é composto por múltiplo
 
 ### 2. Camada de Comunicação (`dms_communication.c`)
 
-- **Responsabilidade**: Comunicação entre processos usando POSIX message queues
+- **Responsabilidade**: Comunicação entre processos usando MPI (Message Passing Interface)
 - **Funções principais**:
-  - `send_message()` / `receive_message()`: Envio e recebimento de mensagens
+  - `send_message()` / `receive_message()`: Envio e recebimento de mensagens via MPI
   - `handle_message()`: Processamento de mensagens recebidas
-  - `invalidate_cache_in_other_processes()`: Protocolo de invalidação
+  - `invalidate_cache_in_other_processes()`: Protocolo de invalidação distribuída
 
 ### 3. API do Sistema (`dms_api.c`)
 
@@ -47,10 +47,10 @@ O Sistema de Memória Compartilhada Distribuída (DMS) é composto por múltiplo
 ## Fluxo de Dados
 
 ```
-[Processo A] ---> [Cache Local] ---> [API le/escreve] ---> [Message Queue] ---> [Processo B]
-     |                                       |                                        |
-     v                                       v                                        v
-[Blocos Locais]                    [Protocolo de Cache]                      [Blocos Locais]
+[Processo A] ---> [Cache Local] ---> [API le/escreve] ---> [MPI] ---> [Processo B]
+     |                                       |                              |
+     v                                       v                              v
+[Blocos Locais]                    [Protocolo de Cache]            [Blocos Locais]
 ```
 
 ## Protocolo de Coerência de Cache
@@ -78,8 +78,8 @@ Contexto global do sistema contendo:
 
 - Configuração do sistema
 - Blocos locais
-- Cache de blocos remotos
-- Fila de mensagens
+- Cache de blocos remotos (Round-Robin)
+- Recursos MPI (rank, size, mutex)
 - Mapeamento de donos de blocos
 
 ### `cache_entry_t`
@@ -103,14 +103,83 @@ Mensagem de comunicação contendo:
 
 ## Considerações de Performance
 
-1. **Cache LRU**: Implementa replacement simples para otimizar uso de memória
-2. **Sincronização**: Mutexes protegem estruturas críticas
-3. **Paralelismo**: Thread dedicada para processamento de mensagens
-4. **Distribuição**: Hash simples para balanceamento de carga
+1. **Cache Round-Robin**: Implementa substituição simples circular; LRU real pode ser implementado futuramente
+2. **Sincronização**: Mutexes protegem estruturas críticas e operações MPI
+3. **Comunicação MPI**: Operações síncronas com timeouts para evitar bloqueios
+4. **Distribuição**: Hash simples para balanceamento de carga entre processos
+
+## Política de Cache
+
+### Implementação Atual: Round-Robin
+
+O sistema implementa uma política de substituição **Round-Robin** para o cache local:
+
+#### Algoritmo de Alocação
+
+```c
+cache_entry_t *allocate_cache_entry(int block_id) {
+    // 1. Busca entrada inválida
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        if (!cache[i].valid) {
+            return setup_entry(&cache[i], block_id);
+        }
+    }
+
+    // 2. Round-Robin se cache cheio
+    static int next_victim = 0;
+    cache_entry_t *victim = &cache[next_victim];
+    next_victim = (next_victim + 1) % CACHE_SIZE;
+    return setup_entry(victim, block_id);
+}
+```
+
+#### Características
+
+- **Simplicidade**: Algoritmo determinístico e eficiente
+- **Baixo Overhead**: Não requer rastreamento de timestamps
+- **Thread-Safe**: Protegido por `cache_mutex`
+- **Previsível**: Comportamento consistente
+
+#### Limitações
+
+- **Não considera localidade temporal**: Pode substituir blocos frequentemente acessados
+- **Performance sub-ótima**: Para workloads com padrões específicos
+
+### Extensões Futuras: LRU
+
+#### Implementação LRU Proposta
+
+Para melhorar a performance em cenários com localidade temporal:
+
+```c
+typedef struct {
+    int block_id;
+    byte *data;
+    int valid;
+    int dirty;
+    uint64_t last_access;  // Timestamp ou contador
+    struct cache_entry *prev, *next;  // Lista duplamente ligada
+    pthread_mutex_t mutex;
+} cache_entry_lru_t;
+```
+
+#### Vantagens LRU
+
+- **Localidade Temporal**: Mantém blocos recentemente acessados
+- **Adaptativo**: Se ajusta ao padrão de acesso
+- **Performance**: Melhor para workloads repetitivos
+
+#### Alternativas de Implementação
+
+1. **LRU com Lista**: O(1) acesso e substituição
+2. **Clock Algorithm**: Aproximação eficiente do LRU
+3. **LRU-K**: Considera K referências passadas
+4. **Segmented LRU**: Combina LRU com outros critérios
 
 ## Limitações Atuais
 
-1. **Escalabilidade**: Limitado a 16 processos
-2. **Tamanho**: Blocos limitados a 4KB
-3. **Rede**: Apenas IPC local (mesmo host)
-4. **Tolerância a Falhas**: Sem recovery automático
+1. **Escalabilidade**: Limitado a 16 processos (MAX_PROCESSES)
+2. **Tamanho**: Blocos limitados a 4KB (MAX_BLOCK_SIZE)
+3. **Comunicação**: Dependente da implementação MPI disponível
+4. **Cache**: Política Round-Robin simples, não otimizada para localidade temporal
+5. **Tolerância a Falhas**: Sem recovery automático de processos MPI

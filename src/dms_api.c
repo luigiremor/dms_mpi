@@ -36,7 +36,6 @@ int le(int posicao, byte *buffer, int tamanho) {
         byte *data_source = NULL;
 
         if (owner == dms_ctx->config.process_id) {
-            // Local block - read directly
             data_source = get_local_block_data(block_id);
             if (!data_source) {
                 return DMS_ERROR_BLOCK_NOT_FOUND;
@@ -44,12 +43,11 @@ int le(int posicao, byte *buffer, int tamanho) {
         } else {
             // Remote block - check cache first
             printf("DEBUG: Process %d reading from remote block %d (owner=%d)\n",
-                    dms_ctx->mpi_rank, block_id, owner);
+                   dms_ctx->mpi_rank, block_id, owner);
 
             cache_entry_t *cache_entry = find_cache_entry(block_id);
 
             if (cache_entry && cache_entry->valid) {
-                // Cache hit - read from cache
                 printf("DEBUG: Cache hit for block %d\n", block_id);
                 pthread_mutex_lock(&cache_entry->mutex);
                 data_source = cache_entry->data;
@@ -62,7 +60,7 @@ int le(int posicao, byte *buffer, int tamanho) {
                     return result;
                 }
 
-                // Now find the cache entry (should be available)
+                // Cache entry should now be available after request
                 cache_entry = find_cache_entry(block_id);
                 if (!cache_entry) {
                     printf("DEBUG: Cache entry not found after request\n");
@@ -74,10 +72,8 @@ int le(int posicao, byte *buffer, int tamanho) {
             }
         }
 
-        // Copy data to user buffer
         memcpy(buffer + bytes_read, data_source + offset_in_block, bytes_to_read);
 
-        // Unlock cache entry if it was locked
         if (owner != dms_ctx->config.process_id) {
             cache_entry_t *cache_entry = find_cache_entry(block_id);
             if (cache_entry) {
@@ -119,7 +115,6 @@ int escreve(int posicao, byte *buffer, int tamanho) {
         int bytes_to_write = (remaining_in_block < remaining_to_write) ? remaining_in_block : remaining_to_write;
 
         if (owner == dms_ctx->config.process_id) {
-            // Local block - write directly
             printf("DEBUG: Process %d writing to local block\n", dms_ctx->mpi_rank);
             byte *local_data = get_local_block_data(block_id);
             if (!local_data) {
@@ -128,13 +123,12 @@ int escreve(int posicao, byte *buffer, int tamanho) {
 
             memcpy(local_data + offset_in_block, buffer + bytes_written, bytes_to_write);
 
-            // Invalidate cache entries in other processes
+            // Invalidate cache entries in other processes for consistency
             invalidate_cache_in_other_processes(block_id);
 
         } else {
-            // Remote block - send write request to owner
             printf("DEBUG: Process %d writing to remote block %d (owner=%d)\n",
-                    dms_ctx->mpi_rank, block_id, owner);
+                   dms_ctx->mpi_rank, block_id, owner);
 
             dms_message_t write_request;
             memset(&write_request, 0, sizeof(write_request));
@@ -170,7 +164,6 @@ int escreve(int posicao, byte *buffer, int tamanho) {
                         handle_message(&response);
                     }
                 } else {
-                    // No message available, process other messages
                     attempts++;
                     usleep(1000);  // 1ms delay
                 }

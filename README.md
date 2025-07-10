@@ -9,9 +9,9 @@ Este projeto implementa um protótipo de sistema de memória compartilhada distr
 ### Componentes Principais
 
 1. **Gerenciamento de Blocos**: Distribui blocos entre processos usando hash simples (block_id % n_processes)
-2. **Cache Local**: Cada processo mantém cache dos blocos remotos acessados
+2. **Cache Local**: Cada processo mantém cache dos blocos remotos acessados com política Round-Robin
 3. **Protocolo de Coerência**: Implementa invalidação na escrita (write-invalidation)
-4. **Comunicação**: Usa filas de mensagens POSIX para comunicação entre processos
+4. **Comunicação**: Usa MPI (Message Passing Interface) para comunicação entre processos
 
 ### Estrutura de Dados
 
@@ -187,6 +187,93 @@ int escreve(int posicao, byte *buffer, int tamanho);
 - `MSG_INVALIDATE`: Invalidar entrada de cache
 - `MSG_INVALIDATE_ACK`: Confirmação de invalidação
 
+### Política de Substituição de Cache
+
+O sistema implementa uma política de substituição **Round-Robin** simples para o cache local:
+
+#### Algoritmo Round-Robin Atual
+
+1. **Busca por Entrada Inválida**: Primeiro tenta encontrar uma entrada de cache marcada como inválida
+2. **Substituição Circular**: Se todas as entradas estão válidas, usa um contador circular (`next_victim`) que percorre as 128 entradas sequencialmente
+3. **Substituição**: A entrada selecionada é sobrescrita com o novo bloco, independentemente da frequência de uso
+
+#### Implementação
+
+```c
+// Se todas as entradas estão válidas, usar Round-Robin
+static int next_victim = 0;
+cache_entry_t *victim = &cache[next_victim];
+next_victim = (next_victim + 1) % CACHE_SIZE;
+```
+
+#### Vantagens do Round-Robin
+
+- **Simplicidade**: Implementação simples e eficiente
+- **Baixo Overhead**: Não requer rastreamento de timestamps ou contadores de acesso
+- **Determinístico**: Comportamento previsível
+- **Thread-Safe**: Fácil de sincronizar
+
+#### Limitações do Round-Robin
+
+- **Não considera localidade temporal**: Pode remover blocos frequentemente acessados
+- **Performance sub-ótima**: Para workloads com padrões de acesso específicos
+- **Fairness desnecessária**: Trata todos os blocos igualmente
+
+#### Extensões Futuras: LRU Real
+
+Para melhorar a performance, o sistema pode ser estendido com **Least Recently Used (LRU)**:
+
+##### Implementação LRU Proposta
+
+```c
+typedef struct {
+    int block_id;
+    byte *data;
+    int valid;
+    int dirty;
+    uint64_t last_access_time;  // Timestamp do último acesso
+    pthread_mutex_t mutex;
+} cache_entry_lru_t;
+
+// Função de substituição LRU
+cache_entry_t *allocate_cache_entry_lru(int block_id) {
+    uint64_t oldest_time = UINT64_MAX;
+    int lru_index = 0;
+
+    // Encontrar entrada menos recentemente usada
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        if (!cache[i].valid) {
+            // Entrada livre encontrada
+            return setup_cache_entry(&cache[i], block_id);
+        }
+        if (cache[i].last_access_time < oldest_time) {
+            oldest_time = cache[i].last_access_time;
+            lru_index = i;
+        }
+    }
+
+    return setup_cache_entry(&cache[lru_index], block_id);
+}
+```
+
+##### Vantagens do LRU
+
+- **Localidade Temporal**: Mantém blocos recentemente acessados
+- **Performance Melhorada**: Para workloads com padrões de acesso repetitivos
+- **Adaptativo**: Se ajusta automaticamente ao padrão de acesso da aplicação
+
+##### Desvantagens do LRU
+
+- **Overhead de Memória**: Requer armazenar timestamps
+- **Overhead Computacional**: Busca pela entrada mais antiga a cada substituição
+- **Complexidade**: Maior complexidade de implementação e debugging
+
+##### Implementações LRU Alternativas
+
+1. **LRU com Lista Duplamente Ligada**: O(1) para acesso, O(1) para substituição
+2. **Approximated LRU**: Usa bits de referência para aproximar LRU com menor overhead
+3. **Clock Algorithm**: Combinação de simplicidade e eficiência
+
 ## Casos de Teste
 
 ### Teste 1: Operações Básicas
@@ -297,9 +384,9 @@ dms/
 
 ### Considerações de Performance
 
-1. **Cache LRU**: Implementa replacement simples round-robin
+1. **Cache Round-Robin**: Implementa substituição simples round-robin; extensão futura pode incluir LRU real
 2. **Sincronização**: Usa mutexes para proteger estruturas críticas
-3. **Comunicação**: Filas de mensagens POSIX podem ter latência
+3. **Comunicação**: MPI pode ter latência dependendo da implementação
 4. **Distribuição**: Hash simples pode causar desbalanceamento
 
 ### Tolerância a Falhas
@@ -312,10 +399,10 @@ dms/
 
 ### Problemas Comuns
 
-1. **Permission Denied**: Verificar permissões para message queues
-2. **Address Already in Use**: Executar `make clean` para limpar queues
+1. **MPI Initialization Error**: Verificar se MPI está configurado corretamente
+2. **Communication Error**: Verificar se todos os processos MPI estão rodando
 3. **Segmentation Fault**: Verificar parâmetros de configuração
-4. **Communication Error**: Verificar se todos os processos estão rodando
+4. **Process Count Mismatch**: Número de processos MPI deve corresponder ao parâmetro 'n'
 
 ### Debug
 
