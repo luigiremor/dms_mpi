@@ -22,14 +22,14 @@ void test_basic_operations(void) {
     byte buffer[256];
     int result;
 
-    printf("Writing '%s' to position 0...\n", test_string);
+    printf("TEST: Writing '%s' to position 0...\n", test_string);
     result = escreve(0, (byte *)test_string, strlen(test_string));
     if (result != DMS_SUCCESS) {
         printf("Error writing: %d\n", result);
         return;
     }
 
-    printf("Reading from position 0...\n");
+    printf("TEST: Reading from position 0...\n");
     memset(buffer, 0, sizeof(buffer));
     result = le(0, buffer, strlen(test_string));
     if (result != DMS_SUCCESS) {
@@ -37,7 +37,7 @@ void test_basic_operations(void) {
         return;
     }
 
-    printf("Read: '%s'\n", buffer);
+    printf("TEST: Read '%s'\n", buffer);
     if (strcmp((char *)buffer, test_string) == 0) {
         printf("✓ Basic read/write test PASSED\n");
     } else {
@@ -45,7 +45,7 @@ void test_basic_operations(void) {
     }
 }
 
-void test_cross_block_operations(void) {
+void test_cross_block_operations(void) {	
     printf("\n=== Testing Cross-Block Operations ===\n");
 
     // Write data that spans multiple blocks
@@ -63,15 +63,15 @@ void test_cross_block_operations(void) {
     int block_size = dms_ctx->config.t;
     int cross_position = block_size - 20;  // Start 20 bytes before block boundary
 
-    printf("Writing %d bytes starting at position %d (crosses block boundary)...\n",
-           len, cross_position);
+    printf("TEST: Writing %d bytes starting at position %d (crosses block boundary)...\n",
+            len, cross_position);
     result = escreve(cross_position, (byte *)long_string, len);
     if (result != DMS_SUCCESS) {
         printf("Error writing cross-block: %d\n", result);
         return;
     }
 
-    printf("Reading back the cross-block data...\n");
+    printf("TEST: Reading back the cross-block data...\n");
     memset(buffer, 0, sizeof(buffer));
     result = le(cross_position, buffer, len);
     if (result != DMS_SUCCESS) {
@@ -106,20 +106,20 @@ void test_cache_behavior(void) {
     }
 
     if (remote_block == -1) {
-        printf("No remote blocks available for cache testing\n");
+        printf("TEST: No remote blocks available for cache testing\n");
         return;
     }
 
     int remote_position = remote_block * dms_ctx->config.t;
 
-    printf("First read from remote block %d (should cause cache miss)...\n", remote_block);
+    printf("TEST: First read from remote block %d (should cause cache miss)...\n", remote_block);
     result = le(remote_position, buffer1, 32);
     if (result != DMS_SUCCESS) {
         printf("Error in first read: %d\n", result);
         return;
     }
 
-    printf("Second read from same remote block (should hit cache)...\n");
+    printf("TEST: Second read from same remote block (should hit cache)...\n");
     result = le(remote_position, buffer2, 32);
     if (result != DMS_SUCCESS) {
         printf("Error in second read: %d\n", result);
