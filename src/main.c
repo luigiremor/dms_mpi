@@ -336,9 +336,21 @@ int main(int argc, char *argv[]) {
     if (config.process_id == 0) {
         // Master process runs all tests
         printf("\nRunning DMS tests...\n");
+
+        printf("\n--- TEST 1: BASIC OPERATIONS ---\n");
+        dms_flush_local_cache();  // Fresh start
         test_basic_operations();
+
+        printf("\n--- TEST 2: CROSS-BLOCK OPERATIONS ---\n");
+        dms_flush_local_cache();  // Isolate from previous test
         test_cross_block_operations();
+
+        printf("\n--- TEST 3: CACHE BEHAVIOR ---\n");
+        dms_flush_local_cache();  // Isolate from previous test
         test_cache_behavior();
+
+        printf("\n--- TEST 4: CACHE INVALIDATION ---\n");
+        dms_flush_local_cache();  // Isolate from previous test
         test_cache_invalidation_scenario();
 
         // Run interactive mode

@@ -187,6 +187,25 @@ byte *get_local_block_data(int block_id) {
     return dms_ctx->blocks + (local_block_index * dms_ctx->config.t);
 }
 
+void dms_flush_local_cache(void) {
+    if (!dms_ctx) return;
+
+    pthread_mutex_lock(&dms_ctx->cache_mutex);
+
+    printf("DEBUG: Flushing local cache (128 entries)...\n");
+
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        pthread_mutex_lock(&dms_ctx->cache[i].mutex);
+        dms_ctx->cache[i].valid = 0;
+        dms_ctx->cache[i].dirty = 0;
+        dms_ctx->cache[i].block_id = -1;
+        pthread_mutex_unlock(&dms_ctx->cache[i].mutex);
+    }
+
+    pthread_mutex_unlock(&dms_ctx->cache_mutex);
+    printf("DEBUG: Cache flush complete\n");
+}
+
 int dms_cleanup(void) {
     if (!dms_ctx) {
         return DMS_SUCCESS;
