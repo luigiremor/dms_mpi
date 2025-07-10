@@ -124,7 +124,7 @@ int escreve(int posicao, byte *buffer, int tamanho) {
             memcpy(local_data + offset_in_block, buffer + bytes_written, bytes_to_write);
 
             // Invalidate cache entries in other processes for consistency
-            invalidate_cache_in_other_processes(block_id);
+            invalidate_cache_and_wait_acks(block_id, dms_ctx->config.process_id);
 
         } else {
             printf("DEBUG: Process %d writing to remote block %d (owner=%d)\n",
