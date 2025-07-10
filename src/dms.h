@@ -6,7 +6,6 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <sys/types.h>
-#include <unistd.h>
 
 #define MAX_PROCESSES 16
 #define MAX_BLOCK_SIZE 4096
@@ -94,9 +93,6 @@ int handle_incoming_messages(void);
 byte *get_local_block_data(int block_id);
 int handle_message(dms_message_t *msg);
 int invalidate_cache_and_wait_acks(int block_id, int requester_pid);
-
-// Write-back function for dirty cache entries - remove static since it's used across files
-int write_back_dirty_entry(cache_entry_t *entry);
 
 // Configuration Functions
 int load_config_from_file(const char *filename, dms_config_t *config);

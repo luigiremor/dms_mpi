@@ -198,20 +198,6 @@ int invalidate_cache_entry(int block_id) {
     cache_entry_t *entry = find_cache_entry(block_id);
     if (entry) {
         pthread_mutex_lock(&entry->mutex);
-
-        // Write-back dirty entry before invalidation
-        if (entry->valid && entry->dirty) {
-            printf("DEBUG: Process %d writing back dirty block %d during invalidation\n",
-                   dms_ctx->mpi_rank, entry->block_id);
-            int result = write_back_dirty_entry(entry);
-            if (result != DMS_SUCCESS) {
-                printf("ERROR: Process %d failed to write-back dirty block %d during invalidation (error: %d)\n",
-                       dms_ctx->mpi_rank, entry->block_id, result);
-                pthread_mutex_unlock(&entry->mutex);
-                return result;
-            }
-        }
-
         entry->valid = 0;
         entry->dirty = 0;
         pthread_mutex_unlock(&entry->mutex);
