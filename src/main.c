@@ -200,6 +200,7 @@ void test_cache_invalidation_scenario(void) {
         return;
     }
 
+    printf("TEST: Verifying invalidation data consistency\n");
     // Check if data changed and matches what we wrote
     if (memcmp(buffer1, buffer2, strlen(test_data)) != 0 &&
         memcmp(buffer2, test_data, strlen(test_data)) == 0) {
