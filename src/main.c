@@ -97,6 +97,10 @@ void test_cache_behavior(void) {
     byte buffer1[64], buffer2[64];
     int result;
 
+    // Initialize buffers with different values to ensure meaningful validation
+    memset(buffer1, 0xAA, sizeof(buffer1));  // Fill with 0xAA pattern
+    memset(buffer2, 0xBB, sizeof(buffer2));  // Fill with 0xBB pattern
+
     // Find a block that belongs to another process
     int remote_block = -1;
     for (int i = 0; i < dms_ctx->config.k; i++) {
