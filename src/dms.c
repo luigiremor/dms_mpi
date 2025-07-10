@@ -133,6 +133,57 @@ cache_entry_t *find_cache_entry(int block_id) {
     return NULL;
 }
 
+int write_back_dirty_entry(cache_entry_t *entry) {
+    if (!entry || !entry->dirty || !entry->valid) {
+        return DMS_SUCCESS;
+    }
+
+    int owner = get_block_owner(entry->block_id);
+    if (owner < 0 || owner >= dms_ctx->config.n) {
+        return DMS_ERROR_INVALID_PROCESS;
+    }
+
+    dms_message_t write_request;
+    memset(&write_request, 0, sizeof(write_request));
+    write_request.type = MSG_WRITE_REQUEST;
+    write_request.block_id = entry->block_id;
+    write_request.position = 0;  // Write entire block
+    write_request.size = dms_ctx->config.t;
+    memcpy(write_request.data, entry->data, dms_ctx->config.t);
+
+    printf("DEBUG: Process %d writing back dirty block %d to owner %d\n",
+           dms_ctx->mpi_rank, entry->block_id, owner);
+
+    int result = send_message(owner, &write_request);
+    if (result != DMS_SUCCESS) {
+        return result;
+    }
+
+    // Wait for write confirmation
+    dms_message_t response;
+    int attempts = 0;
+    const int max_attempts = 1000;
+
+    while (attempts < max_attempts) {
+        result = receive_message(&response);
+        if (result == DMS_SUCCESS) {
+            if (response.type == MSG_WRITE_RESPONSE &&
+                response.block_id == entry->block_id) {
+                printf("DEBUG: Process %d got write-back confirmation for block %d\n",
+                       dms_ctx->mpi_rank, entry->block_id);
+                return DMS_SUCCESS;
+            } else {
+                handle_message(&response);
+            }
+        } else {
+            usleep(1000);
+            attempts++;
+        }
+    }
+
+    return DMS_ERROR_COMMUNICATION;
+}
+
 cache_entry_t *allocate_cache_entry(int block_id) {
     if (!dms_ctx) {
         return NULL;
@@ -151,18 +202,35 @@ cache_entry_t *allocate_cache_entry(int block_id) {
         }
     }
 
-    // If no invalid entry, use LRU replacement (simple round-robin for now)
+    // If no invalid entry, use round-robin replacement with write-back
     static int next_victim = 0;
     cache_entry_t *victim = &dms_ctx->cache[next_victim];
     next_victim = (next_victim + 1) % CACHE_SIZE;
 
     pthread_mutex_lock(&victim->mutex);
+
+    if (victim->valid && victim->dirty) {
+        printf("DEBUG: Process %d evicting dirty block %d, performing write-back\n",
+               dms_ctx->mpi_rank, victim->block_id);
+
+        int write_back_result = write_back_dirty_entry(victim);
+        if (write_back_result != DMS_SUCCESS) {
+            printf("ERROR: Process %d failed to write-back dirty block %d (error: %d)\n",
+                   dms_ctx->mpi_rank, victim->block_id, write_back_result);
+            pthread_mutex_unlock(&victim->mutex);
+            pthread_mutex_unlock(&dms_ctx->cache_mutex);
+            return NULL;
+        }
+    }
+
+    // Now safe to replace the victim entry
     victim->block_id = block_id;
     victim->valid = 1;
     victim->dirty = 0;
-    pthread_mutex_unlock(&victim->mutex);
 
+    pthread_mutex_unlock(&victim->mutex);
     pthread_mutex_unlock(&dms_ctx->cache_mutex);
+
     return victim;
 }
 
@@ -192,8 +260,24 @@ void dms_flush_local_cache(void) {
 
     pthread_mutex_lock(&dms_ctx->cache_mutex);
 
-    printf("DEBUG: Flushing local cache (128 entries)...\n");
+    printf("DEBUG: Flushing local cache (128 entries) with write-back...\n");
 
+    // First pass: write-back all dirty entries
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        pthread_mutex_lock(&dms_ctx->cache[i].mutex);
+        if (dms_ctx->cache[i].valid && dms_ctx->cache[i].dirty) {
+            printf("DEBUG: Writing back dirty block %d during cache flush\n",
+                   dms_ctx->cache[i].block_id);
+            int result = write_back_dirty_entry(&dms_ctx->cache[i]);
+            if (result != DMS_SUCCESS) {
+                printf("ERROR: Failed to write-back dirty block %d during flush (error: %d)\n",
+                       dms_ctx->cache[i].block_id, result);
+            }
+        }
+        pthread_mutex_unlock(&dms_ctx->cache[i].mutex);
+    }
+
+    // Second pass: invalidate all entries
     for (int i = 0; i < CACHE_SIZE; i++) {
         pthread_mutex_lock(&dms_ctx->cache[i].mutex);
         dms_ctx->cache[i].valid = 0;
