@@ -77,6 +77,7 @@ int dms_init(dms_config_t *config);
 int le(int posicao, byte *buffer, int tamanho);
 int escreve(int posicao, byte *buffer, int tamanho);
 int dms_cleanup(void);
+void dms_flush_local_cache(void);
 
 // Internal Functions
 int get_block_owner(int block_id);

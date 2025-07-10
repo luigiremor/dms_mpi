@@ -45,7 +45,7 @@ void test_basic_operations(void) {
     }
 }
 
-void test_cross_block_operations(void) {	
+void test_cross_block_operations(void) {
     printf("\n=== Testing Cross-Block Operations ===\n");
 
     // Write data that spans multiple blocks
@@ -64,7 +64,7 @@ void test_cross_block_operations(void) {
     int cross_position = block_size - 20;  // Start 20 bytes before block boundary
 
     printf("TEST: Writing %d bytes starting at position %d (crosses block boundary)...\n",
-            len, cross_position);
+           len, cross_position);
     result = escreve(cross_position, (byte *)long_string, len);
     if (result != DMS_SUCCESS) {
         printf("Error writing cross-block: %d\n", result);
@@ -79,6 +79,7 @@ void test_cross_block_operations(void) {
         return;
     }
 
+    printf("TEST: Starting comparison between buffer and long string\n");
     buffer[len] = '\0';
     if (strcmp((char *)buffer, long_string) == 0) {
         printf("✓ Cross-block read/write test PASSED\n");
@@ -126,10 +127,86 @@ void test_cache_behavior(void) {
         return;
     }
 
+    printf("TEST: Verifying cache consistency\n");
     if (memcmp(buffer1, buffer2, 32) == 0) {
         printf("✓ Cache consistency test PASSED\n");
     } else {
         printf("✗ Cache consistency test FAILED\n");
+    }
+}
+
+void test_cache_invalidation_scenario(void) {
+    printf("\n=== Testing Cache Invalidation Scenario ===\n");
+
+    byte buffer1[64], buffer2[64];
+    int result;
+
+    // Find a block that belongs to another process and is NOT already cached
+    int remote_block = -1;
+    for (int i = 2; i < dms_ctx->config.k; i++) {  // Start from block 2 to avoid previously used blocks
+        if (get_block_owner(i) != dms_ctx->config.process_id) {
+            // Check if this block is NOT in cache
+            cache_entry_t *existing_entry = find_cache_entry(i);
+            if (!existing_entry || !existing_entry->valid) {
+                remote_block = i;
+                break;
+            }
+        }
+    }
+
+    if (remote_block == -1) {
+        printf("TEST: No suitable remote blocks available for invalidation testing\n");
+        return;
+    }
+
+    int remote_position = remote_block * dms_ctx->config.t;
+    int owner_process = get_block_owner(remote_block);
+
+    // Step 1: Process 0 reads remote block (should be genuine cache miss)
+    printf("TEST: Process 0 reading from remote block %d (owner=%d) - cache miss...\n",
+           remote_block, owner_process);
+
+    result = le(remote_position, buffer1, 32);
+    if (result != DMS_SUCCESS) {
+        printf("Error in first read: %d\n", result);
+        return;
+    }
+
+    // Verify cache entry exists after first read
+    cache_entry_t *cache_entry = find_cache_entry(remote_block);
+    if (cache_entry && cache_entry->valid) {
+        printf("TEST: Block %d now cached in process 0\n", remote_block);
+    } else {
+        printf("Error: Cache entry not found or invalid after read\n");
+        return;
+    }
+
+    // Step 2: Process 0 writes to remote block (simulates Process 1 writing)
+    printf("TEST: Process 0 writing to remote block %d (triggers invalidation)...\n", remote_block);
+
+    const char *test_data = "INVALIDATION_TEST_DATA";
+    result = escreve(remote_position, (byte *)test_data, strlen(test_data));
+    if (result != DMS_SUCCESS) {
+        printf("Error in write operation: %d\n", result);
+        return;
+    }
+
+    // Step 3: Process 0 reads again (should get updated data)
+    printf("TEST: Process 0 reading again from block %d (should see updated data)...\n", remote_block);
+
+    result = le(remote_position, buffer2, 32);
+    if (result != DMS_SUCCESS) {
+        printf("Error in second read: %d\n", result);
+        return;
+    }
+
+    printf("TEST: Verifying invalidation data consistency\n");
+    // Check if data changed and matches what we wrote
+    if (memcmp(buffer1, buffer2, strlen(test_data)) != 0 &&
+        memcmp(buffer2, test_data, strlen(test_data)) == 0) {
+        printf("✓ Cache invalidation test PASSED\n");
+    } else {
+        printf("✗ Cache invalidation test FAILED\n");
     }
 }
 
@@ -262,9 +339,22 @@ int main(int argc, char *argv[]) {
     if (config.process_id == 0) {
         // Master process runs all tests
         printf("\nRunning DMS tests...\n");
+
+        printf("\n--- TEST 1: BASIC OPERATIONS ---\n");
+        dms_flush_local_cache();  // Fresh start
         test_basic_operations();
+
+        printf("\n--- TEST 2: CROSS-BLOCK OPERATIONS ---\n");
+        dms_flush_local_cache();  // Isolate from previous test
         test_cross_block_operations();
+
+        printf("\n--- TEST 3: CACHE BEHAVIOR ---\n");
+        dms_flush_local_cache();  // Isolate from previous test
         test_cache_behavior();
+
+        printf("\n--- TEST 4: CACHE INVALIDATION ---\n");
+        dms_flush_local_cache();  // Isolate from previous test
+        test_cache_invalidation_scenario();
 
         // Run interactive mode
         run_interactive_mode();
