@@ -35,7 +35,6 @@ int dms_init(dms_config_t *config) {
         local_blocks++;
     }
 
-    // Allocate local blocks storage
     size_t local_storage_size = local_blocks * config->t;
     dms_ctx->blocks = malloc(local_storage_size);
     if (!dms_ctx->blocks) {
@@ -44,7 +43,6 @@ int dms_init(dms_config_t *config) {
     }
     memset(dms_ctx->blocks, 0, local_storage_size);
 
-    // Initialize block ownership mapping
     dms_ctx->block_owners = malloc(config->k * sizeof(int));
     if (!dms_ctx->block_owners) {
         free(dms_ctx->blocks);
@@ -52,17 +50,15 @@ int dms_init(dms_config_t *config) {
         return DMS_ERROR_MEMORY;
     }
 
-    // Calculate block ownership
+    // Calculate block ownership using round-robin distribution
     for (int i = 0; i < config->k; i++) {
         dms_ctx->block_owners[i] = i % config->n;
     }
 
-    // Initialize cache
     for (int i = 0; i < CACHE_SIZE; i++) {
         dms_ctx->cache[i].block_id = -1;
         dms_ctx->cache[i].data = malloc(config->t);
         if (!dms_ctx->cache[i].data) {
-            // Cleanup allocated cache entries
             for (int j = 0; j < i; j++) {
                 free(dms_ctx->cache[j].data);
             }
@@ -76,19 +72,14 @@ int dms_init(dms_config_t *config) {
         pthread_mutex_init(&dms_ctx->cache[i].mutex, NULL);
     }
 
-    // Initialize cache mutex
     pthread_mutex_init(&dms_ctx->cache_mutex, NULL);
-
-    // Initialize MPI mutex
     pthread_mutex_init(&dms_ctx->mpi_mutex, NULL);
 
-    // Get MPI rank and size
     MPI_Comm_rank(MPI_COMM_WORLD, &dms_ctx->mpi_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &dms_ctx->mpi_size);
 
     // Verify MPI configuration matches DMS configuration
     if (dms_ctx->mpi_size != config->n) {
-        // Cleanup
         for (int i = 0; i < CACHE_SIZE; i++) {
             free(dms_ctx->cache[i].data);
             pthread_mutex_destroy(&dms_ctx->cache[i].mutex);
@@ -101,7 +92,7 @@ int dms_init(dms_config_t *config) {
         return DMS_ERROR_COMMUNICATION;
     }
 
-    // Use MPI rank as process ID
+    // Use MPI rank as process ID to ensure consistency
     config->process_id = dms_ctx->mpi_rank;
     dms_ctx->config.process_id = dms_ctx->mpi_rank;
 
@@ -201,7 +192,6 @@ int dms_cleanup(void) {
         return DMS_SUCCESS;
     }
 
-    // Cleanup cache
     for (int i = 0; i < CACHE_SIZE; i++) {
         if (dms_ctx->cache[i].data) {
             free(dms_ctx->cache[i].data);

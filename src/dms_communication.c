@@ -77,7 +77,7 @@ int request_block_from_owner(int block_id, int owner_pid) {
     memset(&request, 0, sizeof(request));
     request.type = MSG_READ_REQUEST;
     request.block_id = block_id;
-    request.size = 0;  // No data payload for read requests
+    request.size = 0;
 
     int result = send_message(owner_pid, &request);
     if (result != DMS_SUCCESS) {
@@ -93,7 +93,6 @@ int request_block_from_owner(int block_id, int owner_pid) {
         result = receive_message(&response);
         if (result == DMS_SUCCESS) {
             if (response.type == MSG_READ_RESPONSE && response.block_id == block_id) {
-                // Found our response
                 cache_entry_t *cache_entry = allocate_cache_entry(block_id);
                 if (!cache_entry) {
                     return DMS_ERROR_MEMORY;
@@ -113,8 +112,6 @@ int request_block_from_owner(int block_id, int owner_pid) {
                 handle_message(&response);
             }
         } else {
-            // No message available, wait before retrying
-            // (Removed handle_incoming_messages() to avoid consuming responses)
             usleep(1000);  // 1ms delay
             attempts++;
         }
@@ -150,7 +147,7 @@ int handle_message(dms_message_t *msg) {
             memset(&response, 0, sizeof(response));
             response.type = MSG_READ_RESPONSE;
             response.block_id = msg->block_id;
-            response.size = dms_ctx->config.t;  // Full block size
+            response.size = dms_ctx->config.t;
             memcpy(response.data, local_data, dms_ctx->config.t);
 
             printf("DEBUG: Process %d sending read response\n", dms_ctx->mpi_rank);
@@ -204,7 +201,7 @@ int handle_message(dms_message_t *msg) {
             memset(&response, 0, sizeof(response));
             response.type = MSG_INVALIDATE_ACK;
             response.block_id = msg->block_id;
-            response.size = 0;  // No data payload for invalidate acks
+            response.size = 0;
 
             printf("DEBUG: Process %d sending invalidate ack\n", dms_ctx->mpi_rank);
             return send_message(msg->source_pid, &response);
@@ -274,7 +271,6 @@ int handle_incoming_messages(void) {
 
     dms_message_t msg;
 
-    // Process all available messages
     while (receive_message(&msg) == DMS_SUCCESS) {
         handle_message(&msg);
     }
