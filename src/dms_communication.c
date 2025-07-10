@@ -135,7 +135,7 @@ int handle_message(dms_message_t *msg) {
     }
 
     printf("DEBUG: Process %d handling message type %d from process %d for block %d\n",
-            dms_ctx->mpi_rank, msg->type, msg->source_pid, msg->block_id);
+           dms_ctx->mpi_rank, msg->type, msg->source_pid, msg->block_id);
 
     switch (msg->type) {
         case MSG_READ_REQUEST: {
@@ -172,19 +172,21 @@ int handle_message(dms_message_t *msg) {
                 printf("DEBUG: Process %d updated block %d\n", dms_ctx->mpi_rank, msg->block_id);
             }
 
+            printf("DEBUG: Process %d invalidating caches and waiting for ACKs\n", dms_ctx->mpi_rank);
+            int invalidate_result = invalidate_cache_and_wait_acks(msg->block_id, msg->source_pid);
+            if (invalidate_result != DMS_SUCCESS) {
+                printf("DEBUG: Process %d failed to invalidate caches\n", dms_ctx->mpi_rank);
+                return invalidate_result;
+            }
+
             dms_message_t response;
             memset(&response, 0, sizeof(response));
             response.type = MSG_WRITE_RESPONSE;
             response.block_id = msg->block_id;
-            response.size = 0;  // No data payload for write responses
+            response.size = 0;
 
-            printf("DEBUG: Process %d sending write response\n", dms_ctx->mpi_rank);
-            int result = send_message(msg->source_pid, &response);
-
-            printf("DEBUG: Process %d sending invalidating cache messages to others processes\n", dms_ctx->mpi_rank);
-            invalidate_cache_in_other_processes(msg->block_id);
-
-            return result;
+            printf("DEBUG: Process %d sending write response after invalidation complete\n", dms_ctx->mpi_rank);
+            return send_message(msg->source_pid, &response);
         }
 
         case MSG_INVALIDATE: {
@@ -216,7 +218,7 @@ int handle_message(dms_message_t *msg) {
     return DMS_SUCCESS;
 }
 
-int invalidate_cache_in_other_processes(int block_id) {
+int invalidate_cache_and_wait_acks(int block_id, int requester_pid) {
     if (!dms_ctx) {
         return DMS_ERROR_COMMUNICATION;
     }
@@ -225,12 +227,41 @@ int invalidate_cache_in_other_processes(int block_id) {
     memset(&invalidate_msg, 0, sizeof(invalidate_msg));
     invalidate_msg.type = MSG_INVALIDATE;
     invalidate_msg.block_id = block_id;
-    invalidate_msg.size = 0;  // No data payload for invalidate messages
+    invalidate_msg.size = 0;
 
+    int expected_acks = 0;
     for (int i = 0; i < dms_ctx->config.n; i++) {
-        if (i != dms_ctx->config.process_id) {
-            send_message(i, &invalidate_msg);
+        if (i != dms_ctx->mpi_rank && i != requester_pid) {
+            if (send_message(i, &invalidate_msg) == DMS_SUCCESS) {
+                expected_acks++;
+            }
         }
+    }
+
+    if (expected_acks == 0) {
+        return DMS_SUCCESS;
+    }
+
+    int received_acks = 0;
+    int attempts = 0;
+    const int max_attempts = 1000;
+    dms_message_t response;
+
+    while (received_acks < expected_acks && attempts < max_attempts) {
+        if (receive_message(&response) == DMS_SUCCESS) {
+            if (response.type == MSG_INVALIDATE_ACK && response.block_id == block_id) {
+                received_acks++;
+            } else {
+                handle_message(&response);
+            }
+        } else {
+            usleep(1000);
+            attempts++;
+        }
+    }
+
+    if (received_acks < expected_acks) {
+        return DMS_ERROR_COMMUNICATION;
     }
 
     return DMS_SUCCESS;

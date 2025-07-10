@@ -91,7 +91,7 @@ int invalidate_cache_entry(int block_id);
 int handle_incoming_messages(void);
 byte *get_local_block_data(int block_id);
 int handle_message(dms_message_t *msg);
-int invalidate_cache_in_other_processes(int block_id);
+int invalidate_cache_and_wait_acks(int block_id, int requester_pid);
 
 // Configuration Functions
 int load_config_from_file(const char *filename, dms_config_t *config);
