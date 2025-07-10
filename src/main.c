@@ -210,65 +210,6 @@ void test_cache_invalidation_scenario(void) {
     }
 }
 
-void run_interactive_mode(void) {
-    printf("\n=== Interactive Mode ===\n");
-    printf("Commands: read <pos> <size>, write <pos> <data>, quit\n");
-
-    char command[256];
-    byte buffer[1024];
-
-    while (running) {
-        printf("dms> ");
-        fflush(stdout);
-
-        if (!fgets(command, sizeof(command), stdin)) {
-            break;
-        }
-
-        // Remove newline
-        command[strcspn(command, "\n")] = 0;
-
-        if (strcmp(command, "quit") == 0 || strcmp(command, "exit") == 0) {
-            break;
-        }
-
-        char cmd[64], data[256];
-        int pos, size;
-
-        if (sscanf(command, "read %d %d", &pos, &size) == 2) {
-            if (size > sizeof(buffer)) {
-                printf("Error: Size too large (max %zu)\n", sizeof(buffer));
-                continue;
-            }
-
-            int result = le(pos, buffer, size);
-            if (result == DMS_SUCCESS) {
-                printf("Read %d bytes from position %d:\n", size, pos);
-                printf("Data: ");
-                for (int i = 0; i < size; i++) {
-                    if (buffer[i] >= 32 && buffer[i] <= 126) {
-                        printf("%c", buffer[i]);
-                    } else {
-                        printf("\\x%02x", buffer[i]);
-                    }
-                }
-                printf("\n");
-            } else {
-                printf("Error reading: %d\n", result);
-            }
-        } else if (sscanf(command, "write %d %s", &pos, data) == 2) {
-            int result = escreve(pos, (byte *)data, strlen(data));
-            if (result == DMS_SUCCESS) {
-                printf("Wrote %zu bytes to position %d\n", strlen(data), pos);
-            } else {
-                printf("Error writing: %d\n", result);
-            }
-        } else {
-            printf("Unknown command. Use: read <pos> <size>, write <pos> <data>, quit\n");
-        }
-    }
-}
-
 int main(int argc, char *argv[]) {
     dms_config_t config;
     int result;
@@ -356,8 +297,8 @@ int main(int argc, char *argv[]) {
         dms_flush_local_cache();  // Isolate from previous test
         test_cache_invalidation_scenario();
 
-        // Run interactive mode
-        run_interactive_mode();
+        printf("\n--- ALL TESTS COMPLETED ---\n");
+        printf("Process 0 tests finished, waiting for cleanup...\n");
     } else {
         // Other processes just handle requests in a loop
         printf("Process %d ready, handling requests...\n", config.process_id);
