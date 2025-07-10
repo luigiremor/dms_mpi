@@ -210,6 +210,90 @@ void test_cache_invalidation_scenario(void) {
     }
 }
 
+void test_dirty_cache_eviction_bug(void) {
+    printf("\n=== Testing Dirty Cache Eviction Bug ===\n");
+
+    // This test demonstrates the cache eviction bug where dirty entries
+    // are evicted without write-back, causing data inconsistency
+
+    // Step 1: Find a remote block for testing
+    int remote_block = -1;
+    for (int i = 0; i < dms_ctx->config.k; i++) {
+        if (get_block_owner(i) != dms_ctx->config.process_id) {
+            remote_block = i;
+            break;
+        }
+    }
+
+    if (remote_block == -1) {
+        printf("TEST: No remote blocks available for dirty eviction testing\n");
+        return;
+    }
+
+    int remote_position = remote_block * dms_ctx->config.t;
+    int owner_process = get_block_owner(remote_block);
+
+    printf("TEST: Using remote block %d (owner=%d) for dirty eviction test\n",
+           remote_block, owner_process);
+
+    // Step 2: Read the remote block to cache it
+    byte initial_data[64];
+    int result = le(remote_position, initial_data, 32);
+    if (result != DMS_SUCCESS) {
+        printf("Error reading initial data: %d\n", result);
+        return;
+    }
+
+    // Step 3: Simulate a dirty write to the cached block
+    cache_entry_t *cache_entry = find_cache_entry(remote_block);
+    if (!cache_entry) {
+        printf("Error: Block not found in cache after read\n");
+        return;
+    }
+
+    const char *dirty_data = "DIRTY_TEST_DATA_SHOULD_BE_WRITTEN_BACK";
+    pthread_mutex_lock(&cache_entry->mutex);
+    memcpy(cache_entry->data, dirty_data, strlen(dirty_data));
+    cache_entry->dirty = 1;  // Mark as dirty
+    pthread_mutex_unlock(&cache_entry->mutex);
+
+    printf("TEST: Marked block %d as dirty with test data\n", remote_block);
+
+    // Step 4: Force write-back by manually invalidating (simulates eviction scenario)
+    // This should trigger the write-back mechanism we just implemented
+    printf("TEST: Forcing write-back by invalidating dirty cache entry...\n");
+
+    result = invalidate_cache_entry(remote_block);
+    if (result != DMS_SUCCESS) {
+        printf("Error during cache invalidation: %d\n", result);
+        return;
+    }
+
+    printf("TEST: Cache invalidation complete, checking if dirty data was written back\n");
+
+    // Step 5: Read the block again from a fresh cache
+    // If write-back worked, we should see the dirty data
+    // If write-back failed, we'll see the original data (inconsistency)
+
+    byte final_data[64];
+    result = le(remote_position, final_data, strlen(dirty_data));
+    if (result != DMS_SUCCESS) {
+        printf("Error reading final data: %d\n", result);
+        return;
+    }
+
+    // Step 6: Check consistency
+    printf("TEST: Verifying data consistency after invalidation\n");
+    if (memcmp(final_data, dirty_data, strlen(dirty_data)) == 0) {
+        printf("✓ Dirty cache eviction test PASSED - write-back worked correctly\n");
+    } else {
+        printf("✗ Dirty cache eviction test FAILED - dirty data was lost!\n");
+        printf("Expected: %s\n", dirty_data);
+        printf("Got: %.*s\n", (int)strlen(dirty_data), final_data);
+        printf("This indicates the cache eviction bug is present\n");
+    }
+}
+
 int main(int argc, char *argv[]) {
     dms_config_t config;
     int result;
@@ -282,20 +366,24 @@ int main(int argc, char *argv[]) {
         printf("\nRunning DMS tests...\n");
 
         printf("\n--- TEST 1: BASIC OPERATIONS ---\n");
-        dms_flush_local_cache();  // Fresh start
+        dms_flush_local_cache();
         test_basic_operations();
 
         printf("\n--- TEST 2: CROSS-BLOCK OPERATIONS ---\n");
-        dms_flush_local_cache();  // Isolate from previous test
+        dms_flush_local_cache();
         test_cross_block_operations();
 
         printf("\n--- TEST 3: CACHE BEHAVIOR ---\n");
-        dms_flush_local_cache();  // Isolate from previous test
+        dms_flush_local_cache();
         test_cache_behavior();
 
         printf("\n--- TEST 4: CACHE INVALIDATION ---\n");
-        dms_flush_local_cache();  // Isolate from previous test
+        dms_flush_local_cache();
         test_cache_invalidation_scenario();
+
+        printf("\n--- TEST 5: DIRTY CACHE EVICTION BUG ---\n");
+        dms_flush_local_cache();
+        test_dirty_cache_eviction_bug();
 
         printf("\n--- ALL TESTS COMPLETED ---\n");
         printf("Process 0 tests finished, waiting for cleanup...\n");
