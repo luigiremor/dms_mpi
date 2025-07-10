@@ -170,7 +170,7 @@ int escreve(int posicao, byte *buffer, int tamanho) {
             }
 
             if (!found_response) {
-                printf("DEBUG: Process %d timed out waiting for write response\n");
+                printf("DEBUG: Process %d timed out waiting for write response\n", dms_ctx->mpi_rank);
                 return DMS_ERROR_COMMUNICATION;
             }
 
