@@ -79,6 +79,7 @@ void test_cross_block_operations(void) {
         return;
     }
 
+	printf("TEST: Starting comparison between buffer and long string\n");
     buffer[len] = '\0';
     if (strcmp((char *)buffer, long_string) == 0) {
         printf("✓ Cross-block read/write test PASSED\n");
@@ -126,6 +127,7 @@ void test_cache_behavior(void) {
         return;
     }
 
+	printf("TEST: Verifying cache consistency\n");
     if (memcmp(buffer1, buffer2, 32) == 0) {
         printf("✓ Cache consistency test PASSED\n");
     } else {
