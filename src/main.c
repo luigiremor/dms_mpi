@@ -79,7 +79,7 @@ void test_cross_block_operations(void) {
         return;
     }
 
-	printf("TEST: Starting comparison between buffer and long string\n");
+    printf("TEST: Starting comparison between buffer and long string\n");
     buffer[len] = '\0';
     if (strcmp((char *)buffer, long_string) == 0) {
         printf("✓ Cross-block read/write test PASSED\n");
@@ -127,7 +127,7 @@ void test_cache_behavior(void) {
         return;
     }
 
-	printf("TEST: Verifying cache consistency\n");
+    printf("TEST: Verifying cache consistency\n");
     if (memcmp(buffer1, buffer2, 32) == 0) {
         printf("✓ Cache consistency test PASSED\n");
     } else {
@@ -162,8 +162,8 @@ void test_cache_invalidation_scenario(void) {
     int remote_position = remote_block * dms_ctx->config.t;
     int owner_process = get_block_owner(remote_block);
 
-    // Step 1: Process A reads remote block (should be genuine cache miss)
-    printf("TEST: Process A reading from remote block %d (owner=%d) - cache miss...\n",
+    // Step 1: Process 0 reads remote block (should be genuine cache miss)
+    printf("TEST: Process 0 reading from remote block %d (owner=%d) - cache miss...\n",
            remote_block, owner_process);
 
     result = le(remote_position, buffer1, 32);
@@ -175,14 +175,14 @@ void test_cache_invalidation_scenario(void) {
     // Verify cache entry exists after first read
     cache_entry_t *cache_entry = find_cache_entry(remote_block);
     if (cache_entry && cache_entry->valid) {
-        printf("TEST: Block %d now cached in process A\n", remote_block);
+        printf("TEST: Block %d now cached in process 0\n", remote_block);
     } else {
         printf("Error: Cache entry not found or invalid after read\n");
         return;
     }
 
-    // Step 2: Process A writes to remote block (simulates Process B writing)
-    printf("TEST: Process A writing to remote block %d (triggers invalidation)...\n", remote_block);
+    // Step 2: Process 0 writes to remote block (simulates Process 1 writing)
+    printf("TEST: Process 0 writing to remote block %d (triggers invalidation)...\n", remote_block);
 
     const char *test_data = "INVALIDATION_TEST_DATA";
     result = escreve(remote_position, (byte *)test_data, strlen(test_data));
@@ -191,8 +191,8 @@ void test_cache_invalidation_scenario(void) {
         return;
     }
 
-    // Step 3: Process A reads again (should get updated data)
-    printf("TEST: Process A reading again from block %d (should see updated data)...\n", remote_block);
+    // Step 3: Process 0 reads again (should get updated data)
+    printf("TEST: Process 0 reading again from block %d (should see updated data)...\n", remote_block);
 
     result = le(remote_position, buffer2, 32);
     if (result != DMS_SUCCESS) {
