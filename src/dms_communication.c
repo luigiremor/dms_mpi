@@ -135,14 +135,14 @@ int handle_message(dms_message_t *msg) {
     }
 
     printf("DEBUG: Process %d handling message type %d from process %d for block %d\n",
-           dms_ctx->mpi_rank, msg->type, msg->source_pid, msg->block_id);
+            dms_ctx->mpi_rank, msg->type, msg->source_pid, msg->block_id);
 
     switch (msg->type) {
         case MSG_READ_REQUEST: {
-            printf("DEBUG: Processing read request\n");
+            printf("DEBUG: Process %d processing read request\n", dms_ctx->mpi_rank);
             byte *local_data = get_local_block_data(msg->block_id);
             if (!local_data) {
-                printf("DEBUG: Block %d not found locally\n", msg->block_id);
+                printf("DEBUG: Process %d did not found block %d locally\n", dms_ctx->mpi_rank, msg->block_id);
                 return DMS_ERROR_BLOCK_NOT_FOUND;
             }
 
@@ -153,15 +153,15 @@ int handle_message(dms_message_t *msg) {
             response.size = dms_ctx->config.t;  // Full block size
             memcpy(response.data, local_data, dms_ctx->config.t);
 
-            printf("DEBUG: Sending read response\n");
+            printf("DEBUG: Process %d sending read response\n", dms_ctx->mpi_rank);
             return send_message(msg->source_pid, &response);
         }
 
         case MSG_WRITE_REQUEST: {
-            printf("DEBUG: Processing write request\n");
+            printf("DEBUG: Process %d processing write request\n", dms_ctx->mpi_rank);
             byte *local_data = get_local_block_data(msg->block_id);
             if (!local_data) {
-                printf("DEBUG: Block %d not found locally\n", msg->block_id);
+                printf("DEBUG: Process %d did not found block %d locally\n", dms_ctx->mpi_rank, msg->block_id);
                 return DMS_ERROR_BLOCK_NOT_FOUND;
             }
 
@@ -169,7 +169,7 @@ int handle_message(dms_message_t *msg) {
             int size = msg->size;
             if (offset >= 0 && offset + size <= dms_ctx->config.t) {
                 memcpy(local_data + offset, msg->data, size);
-                printf("DEBUG: Updated block %d\n", msg->block_id);
+                printf("DEBUG: Process %d updated block %d\n", dms_ctx->mpi_rank, msg->block_id);
             }
 
             dms_message_t response;
@@ -178,24 +178,24 @@ int handle_message(dms_message_t *msg) {
             response.block_id = msg->block_id;
             response.size = 0;  // No data payload for write responses
 
-            printf("DEBUG: Sending write response\n");
+            printf("DEBUG: Process %d sending write response\n", dms_ctx->mpi_rank);
             int result = send_message(msg->source_pid, &response);
 
-            printf("DEBUG: Invalidating caches in other processes\n");
+            printf("DEBUG: Process %d sending invalidating cache messages to others processes\n", dms_ctx->mpi_rank);
             invalidate_cache_in_other_processes(msg->block_id);
 
             return result;
         }
 
         case MSG_INVALIDATE: {
-            printf("DEBUG: Processing invalidate request\n");
+            printf("DEBUG: Process %d processing invalidate request\n", dms_ctx->mpi_rank);
             cache_entry_t *entry = find_cache_entry(msg->block_id);
             if (entry) {
                 pthread_mutex_lock(&entry->mutex);
                 entry->valid = 0;
                 entry->dirty = 0;
                 pthread_mutex_unlock(&entry->mutex);
-                printf("DEBUG: Invalidated cache for block %d\n", msg->block_id);
+                printf("DEBUG: Process %d invalidated cache for block %d\n", dms_ctx->mpi_rank, msg->block_id);
             }
 
             dms_message_t response;
@@ -204,12 +204,12 @@ int handle_message(dms_message_t *msg) {
             response.block_id = msg->block_id;
             response.size = 0;  // No data payload for invalidate acks
 
-            printf("DEBUG: Sending invalidate ack\n");
+            printf("DEBUG: Process %d sending invalidate ack\n", dms_ctx->mpi_rank);
             return send_message(msg->source_pid, &response);
         }
 
         default:
-            printf("DEBUG: Unknown message type %d\n", msg->type);
+            printf("DEBUG: Process %d doesn't recognize message type %d\n", dms_ctx->mpi_rank, msg->type);
             break;
     }
 

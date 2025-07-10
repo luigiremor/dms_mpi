@@ -44,7 +44,7 @@ int le(int posicao, byte *buffer, int tamanho) {
         } else {
             // Remote block - check cache first
             printf("DEBUG: Process %d reading from remote block %d (owner=%d)\n",
-                   dms_ctx->mpi_rank, block_id, owner);
+                    dms_ctx->mpi_rank, block_id, owner);
 
             cache_entry_t *cache_entry = find_cache_entry(block_id);
 
@@ -120,6 +120,7 @@ int escreve(int posicao, byte *buffer, int tamanho) {
 
         if (owner == dms_ctx->config.process_id) {
             // Local block - write directly
+            printf("DEBUG: Process %d writing to local block\n", dms_ctx->mpi_rank);
             byte *local_data = get_local_block_data(block_id);
             if (!local_data) {
                 return DMS_ERROR_BLOCK_NOT_FOUND;
@@ -133,7 +134,7 @@ int escreve(int posicao, byte *buffer, int tamanho) {
         } else {
             // Remote block - send write request to owner
             printf("DEBUG: Process %d writing to remote block %d (owner=%d)\n",
-                   dms_ctx->mpi_rank, block_id, owner);
+                    dms_ctx->mpi_rank, block_id, owner);
 
             dms_message_t write_request;
             memset(&write_request, 0, sizeof(write_request));
@@ -149,7 +150,7 @@ int escreve(int posicao, byte *buffer, int tamanho) {
                 return result;
             }
 
-            printf("DEBUG: Sent write request, waiting for response...\n");
+            printf("DEBUG: Process %d sent write request, waiting for response...\n", dms_ctx->mpi_rank);
 
             // Wait for acknowledgment with timeout
             dms_message_t response;
@@ -161,11 +162,11 @@ int escreve(int posicao, byte *buffer, int tamanho) {
                 result = receive_message(&response);
                 if (result == DMS_SUCCESS) {
                     if (response.type == MSG_WRITE_RESPONSE && response.block_id == block_id) {
-                        printf("DEBUG: Got write response\n");
+                        printf("DEBUG: Process %d got write response\n", dms_ctx->mpi_rank);
                         found_response = 1;
                     } else {
                         // Handle other messages that aren't our response
-                        printf("DEBUG: Handling other message type %d\n", response.type);
+                        printf("DEBUG: Process %d handling other message type %d\n", dms_ctx->mpi_rank, response.type);
                         handle_message(&response);
                     }
                 } else {
@@ -176,7 +177,7 @@ int escreve(int posicao, byte *buffer, int tamanho) {
             }
 
             if (!found_response) {
-                printf("DEBUG: Timeout waiting for write response\n");
+                printf("DEBUG: Process %d timed out waiting for write response\n");
                 return DMS_ERROR_COMMUNICATION;
             }
 
