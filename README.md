@@ -68,7 +68,7 @@ dms/
 
 ## Membros da equipe
 
-Gustavo Luiz Kohler - 23102480
-Leonardo Peres - 23200521
-Lucas Nunes Bossle - 23100751
-Luigi Remor - 23203395
+- Gustavo Luiz Kohler - 23102480
+- Leonardo Peres - 23200521
+- Lucas Nunes Bossle - 23100751
+- Luigi Remor - 23203395
