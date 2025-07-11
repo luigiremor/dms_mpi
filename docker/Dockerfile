@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY ./src/ ./src/
+COPY ./dms.conf ./
 
 # Compilar tudo numa única linha sem depender do Makefile
 RUN mpicc -Wall -Wextra -std=c99 -pthread \

@@ -6,7 +6,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: dms_mpi_system
-    command: ["-np", "4", "./dms", "-n", "4", "-k", "100", "-t", "1024"]
+    command: ["-np", "4", "./dms", "dms.conf"]
     stdin_open: true
     tty: true
     networks:
