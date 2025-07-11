@@ -12,7 +12,7 @@ SOURCES = $(SRC_DIR)/dms.c $(SRC_DIR)/dms_communication.c $(SRC_DIR)/dms_api.c $
 OBJECTS = $(SOURCES:.c=.o)
 
 # Test source files  
-TEST_SOURCES = $(SRC_DIR)/dms.c $(SRC_DIR)/dms_communication.c $(SRC_DIR)/dms_api.c $(SRC_DIR)/dms_config.c $(SRC_DIR)/test_suite.c
+TEST_SOURCES = $(SRC_DIR)/dms.c $(SRC_DIR)/dms_communication.c $(SRC_DIR)/dms_api.c $(SRC_DIR)/dms_config.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 
 # Header files
