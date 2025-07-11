@@ -65,7 +65,7 @@ typedef struct {
     int *block_owners;
     cache_entry_t cache[CACHE_SIZE];
     pthread_mutex_t cache_mutex;
-    pthread_mutex_t mpi_mutex;  // New mutex for MPI operations
+    pthread_mutex_t mpi_mutex;
     int mpi_rank;
     int mpi_size;
 } dms_context_t;
