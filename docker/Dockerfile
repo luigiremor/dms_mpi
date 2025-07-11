@@ -1,40 +1,23 @@
-# Dockerfile for Distributed Shared Memory System
 FROM ubuntu:22.04
 
-# Set non-interactive mode for apt
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     gcc \
-    make \
-    gdb \
-    valgrind \
-    htop \
-    vim \
     libopenmpi-dev \
     openmpi-bin \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
 WORKDIR /app
 
-# Copy source files
 COPY ./src/ ./src/
-COPY ./Makefile ./README.md ./
+COPY ./dms.conf ./
 
-# Build the application
-RUN make clean && make
+# Compilar tudo numa única linha sem depender do Makefile
+RUN mpicc -Wall -Wextra -std=c99 -pthread \
+    src/dms.c src/dms_communication.c src/dms_api.c src/dms_config.c src/main.c \
+    -o dms -pthread
 
-# Create a non-root user for better security
-RUN useradd -m -s /bin/bash dmsuser && \
-    chown -R dmsuser:dmsuser /app
-
-# Switch to non-root user
-USER dmsuser
-
-# Expose no ports (local IPC only)
-
-# Default command shows help
-CMD ["./dms", "-h"] 
+# Definir ENTRYPOINT para garantir que mpirun seja sempre usado
+ENTRYPOINT ["mpirun", "--allow-run-as-root", "--mca", "btl", "^vader"] 
